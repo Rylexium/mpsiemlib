@@ -403,7 +403,7 @@ class EventsAPI(ModuleInterface, LoggingHandler):
         result = []
         for line in response:
             values = line['values']
-            d = {fields[i]: values[i] for i in range(len(fields))}
+            d = {fields[i]: "None" if len(values) == 0 else values[i] for i in range(len(fields))}
             d['count'] = line['count']
             result.append(d)
 
