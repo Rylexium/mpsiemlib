@@ -1,5 +1,6 @@
 import json
 import time
+import re
 from datetime import datetime
 from typing import List
 
@@ -183,6 +184,25 @@ class HealthMonitor(ModuleInterface, LoggingHandler):
 
         return status
 
+    def __humanbytes(self, bytes):
+        """Return the given bytes as a human friendly KB, MB, GB, or TB string."""
+        B = float(bytes)
+        KB = float(1024)
+        MB = float(KB ** 2)  # 1,048,576
+        GB = float(KB ** 3)  # 1,073,741,824
+        TB = float(KB ** 4)  # 1,099,511,627,776
+
+        if B < KB:
+            return '{0} {1}'.format(B, 'Байты' if 0 == B > 1 else 'Байт')
+        elif KB <= B < MB:
+            return '{0:.2f} КБ'.format(B / KB)
+        elif MB <= B < GB:
+            return '{0:.2f} МБ'.format(B / MB)
+        elif GB <= B < TB:
+            return '{0:.2f} ГБ'.format(B / GB)
+        elif TB <= B:
+            return '{0:.2f} ТБ'.format(B / TB)
+
     def get_error_messages(self) -> list:
         """
         Позволяет получить список сообщений в HealthMonitor'e
@@ -211,41 +231,56 @@ class HealthMonitor(ModuleInterface, LoggingHandler):
             url = f"https://{self.__core_hostname}{api_url}"
             r = exec_request(self.__core_session, url, method='GET', timeout=self.settings.connection_timeout)
             self.__error_patterns = json.loads(str(r.text).encode('utf-8'))  # тут могут быть траблы с кодировкой, поэтому utf-8
-            self.__error_patterns = {pattern.lower(): self.__error_patterns[pattern]
-                                     for pattern in self.__error_patterns}
+            self.__error_patterns = {
+                pattern.replace('_', '').replace('-', '').replace('.', '').lower(): self.__error_patterns[pattern]
+                for pattern in self.__error_patterns}
 
-        prefix, rows = "navigation.notifications.message", []
+        prefix, rows = "navigationnotificationsmessage", []
         for item in items:
-            type_err, type_err_sensitive = item['type'].replace('.', '').lower(), ""
+            type_err, type_err_sensitive = item['type'].replace('_', '').replace('-', '').replace('.', '').lower(), ""
             if item['sensitive']:
                 type_err_sensitive = f"{type_err}sensitive"
 
             # если существует ключ с добавлением sensitive, то берём этот шаблон, иначе без sensitive
-            pattern = self.__error_patterns[f"{prefix}.{type_err_sensitive}"
-            if f"{prefix}.{type_err_sensitive}" in self.__error_patterns.keys()
-            else f"{prefix}.{type_err}"]
+            pattern = self.__error_patterns[f"{prefix}{type_err_sensitive}"
+            if f"{prefix}{type_err_sensitive}" in self.__error_patterns.keys()
+            else f"{prefix}{type_err}"]
 
             # замением все значения типа {value} в шаблоне. Нужные значения хранятся в виде json по ключу parameters
             params = item.get("parameters")
             for param in params:
                 if param == "ipAddresses":
-                    params[param] = f" ({', '.join([adr for adr in params[param]])})"
-                pattern = pattern.replace('{' + param + '}', str(params[param]))
-                pattern = pattern.replace('{{' + param + '}}', str(params[param]))
+                    params[param] = f" ({', '.join([adr for adr in params[param]])})" if len(params[param]) > 0 else ""
+
+
+                # {{threshold | bytes}}     v.23-v.24
+                # {threshold, bytes}        v.25-v.26
+                if param == 'threshold':
+                    params[param] = self.__humanbytes(params[param])
+                pattern = pattern.replace("{" + param + "}", str(params[param]))\
+                    .replace("{" + str(params[param]) + "}", str(params[param]))
 
             # Далее танцы с бубном, потому что эти значения могут быть, а могут и не быть, поэтому если они есть, то будут добавлены
-            if "source" in item.keys() and "displayName" in item['source']:
-                pattern += f"\nОт {item['source']['displayName']}"
-            if "source" in item.keys() and "hostName" in item['source']:
-                addresses = ""
-                if "source" in item.keys() and \
-                        "ipAddresses" in item['source'] and item['source']['ipAddresses'] is not None:
-                    addresses = ', '.join([adr for adr in item['source']['ipAddresses']])
-                pattern += f"\nна узле {item['source']['hostName']}"
-                if addresses != "":
-                    pattern += f" ({addresses})"
+            if item.get('source') is not None:
+                if item['source'].get('displayName') is not None:
+                    pattern += f"\nОт {item['source']['displayName']}"
+                if item['source'].get("hostName") is not None:
+                    addresses = ""
+                    if item['source'].get('ipAddresses') is not None and len(item['source']['ipAddresses']) > 0:
+                        addresses = ', '.join([adr for adr in item['source']['ipAddresses']])
+                    pattern += f"\nна узле {item['source']['hostName']}"
+                    if addresses != "":
+                        pattern += f" ({addresses})"
+
+            union = set(re.findall("\{([^}]+)\}", pattern)).union(re.findall("\{{([^}]+)\}}", pattern))
+            for field in union:
+                pattern = pattern.replace(field, '')
+
             rows.append({"time": item['timestamp'], "status": item['status'], "displayName": item['displayName'],
-                         "componentName": item['componentName'], "message": pattern})
+                         "componentName": item['componentName'],
+                         "message": re.sub("\s\s+" , " ",
+                                           pattern.replace('{', '').replace('}', '')
+                                           .replace('| bytes', '').replace(', bytes', ''))})
 
         return rows
 

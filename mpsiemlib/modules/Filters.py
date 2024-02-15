@@ -9,6 +9,8 @@ class Filters(ModuleInterface, LoggingHandler):
 
     __api_filters_list = '/api/v2/events/filters_hierarchy'
     __api_filter_info = '/api/v2/events/filters/{}'
+    __api_folders = '/api/v2/events/folders'
+    __api_filters = '/api/v2/events/filters'
 
     def __init__(self, auth: MPSIEMAuth, settings: Settings):
         ModuleInterface.__init__(self, auth, settings)
@@ -19,13 +21,13 @@ class Filters(ModuleInterface, LoggingHandler):
         self.__filters = {}
         self.log.debug('status=success, action=prepare, msg="Filters Module init"')
 
-    def get_folders_list(self) -> dict:
+    def get_folders_list(self, is_force_update=False) -> dict:
         """
         Получить список всех папок с фильтрами
 
         :return: {"id": {"parent_id": "value", "name": "value", "source": "value"}}
         """
-        if len(self.__folders) != 0:
+        if len(self.__folders) != 0 and not is_force_update:
             return self.__folders
 
         url = f'https://{self.__core_hostname}{self.__api_filters_list}'
@@ -121,6 +123,60 @@ class Filters(ModuleInterface, LoggingHandler):
             if filters[uuid_filter]['name'] == filter_name:
                 return self.get_filter_info(uuid_filter)
         return None
+
+    def get_folder_by_name(self, folder_name):
+        """
+        По имени возвращает информацию первый найденный директории
+        folder_name : имя фильтра в SIEM
+        """
+        folders = self.get_folders_list()
+        for uuid_folder in folders:
+            if folders[uuid_folder]['name'] == folder_name:
+                folders[uuid_folder]['uuid'] = uuid_folder
+                return folders[uuid_folder]
+        return None
+
+    def create_folder_by_name(self, folder_parent_name, folder_name):
+        folder_parent_id = self.get_folder_by_name(folder_parent_name)['uuid']
+        return self.create_folder_by_id(folder_parent_id, folder_name)
+
+    def create_folder_by_id(self, folder_parent_id, folder_name):
+        url = f'https://{self.__core_hostname}{self.__api_folders}'
+        r = exec_request(self.__core_session,
+                         url,
+                         method='POST',
+                         timeout=self.settings.connection_timeout,
+                         json={"parentId": folder_parent_id, "name": folder_name})
+        self.get_folders_list(is_force_update=True)
+        return r.json()
+
+    def delete_folder_by_name(self, folder_name):
+        folder_id = self.get_folder_by_name(folder_name)['uuid']
+        return self.delete_folder_by_id(folder_id)
+
+    def delete_folder_by_id(self, folder_id):
+        url = f'https://{self.__core_hostname}{self.__api_folders}/{folder_id}'
+        r = exec_request(self.__core_session,
+                         url,
+                         method='DELETE',
+                         timeout=self.settings.connection_timeout)
+        self.get_folders_list(is_force_update=True)
+        return r.status_code == 200
+
+    def create_filter_by_folder_name(self, filter, folder_name):
+        folder_id = self.get_folder_by_name(folder_name)
+        return self.create_filter_by_folder_id(filter, folder_id)
+
+    def create_filter_by_folder_id(self, filter, folder_id):
+        url = f'https://{self.__core_hostname}{self.__api_filters}'
+        filter['folderId'] = folder_id
+        r = exec_request(self.__core_session,
+                         url,
+                         method='POST',
+                         timeout=self.settings.connection_timeout,
+                         json=filter)
+        self.get_folders_list(is_force_update=True)
+        return r.json()
 
     def close(self):
         if self.__core_session is not None:

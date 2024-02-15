@@ -1,4 +1,5 @@
 import json
+import re
 import time
 from typing import Optional
 
@@ -466,76 +467,56 @@ class Tasks(ModuleInterface, LoggingHandler):
         response = r.json()
         if response.get("items") is None:
             raise Exception("No items in response")
-        jobs = {}
-        for item in response.get("items"):
-            if item.get('startedBy') is None:
-                jobs[item.get('id')] = {"status": item.get("status"),
-                                        "startedAt": item.get("startedAt"),
-                                        "finishedAt": item.get("finishedAt"),
-                                        "jobCount": item.get("jobCount"),
-                                        "id": None,
-                                        "login": None,
-                                        "firstName": None,
-                                        "lastName": None,
-                                        "stoppedBy": item.get("stoppedBy"),
-                                        "errorStatus": item.get("errorStatus"),
-                                        }
-            else:
-                jobs[item.get('id')] = {"status": item.get("status"),
-                                     "startedAt": item.get("startedAt"),
-                                     "finishedAt": item.get("finishedAt"),
-                                     "jobCount": item.get("jobCount"),
-                                     "id": item.get('startedBy').get('id'),
-                                     "login": item.get('startedBy').get("login"),
-                                     "firstName": item.get('startedBy').get("firstName"),
-                                     "lastName": item.get('startedBy').get("lastName"),
-                                     "stoppedBy": item.get("stoppedBy"),
-                                     "errorStatus": item.get("errorStatus"),
-                                     }
-        # jobs = {item.get("id"): {"status": item.get("status"),
-        #                          "startedAt": item.get("startedAt"),
-        #                          "finishedAt": item.get("finishedAt"),
-        #                          "jobCount": item.get("jobCount"),
-        #                          "id": item.get('startedBy').get('id'),
-        #                          "login": item.get('startedBy').get("login"),
-        #                          "firstName": item.get('startedBy').get("firstName"),
-        #                          "lastName": item.get('startedBy').get("lastName"),
-        #                          "stoppedBy": item.get("stoppedBy"),
-        #                          "errorStatus": item.get("errorStatus"),
-        #                          } for item in response.get("items")}
+        jobs = {item.get("id"): {
+            "status": item.get("status"),
+            "startedAt": item.get("startedAt"),
+            "finishedAt": item.get("finishedAt"),
+            "jobCount": item.get("jobCount"),
+            "id": item['startedBy'].get('id') if item.get('startedBy') is not None else None,
+            "login": item['startedBy'].get("login") if item.get('startedBy') is not None else None,
+            "firstName": item['startedBy'].get("firstName") if item.get('startedBy') is not None else None,
+            "lastName": item['startedBy'].get("lastName") if item.get('startedBy') is not None else None,
+            "stoppedBy": item.get("stoppedBy"),
+            "errorStatus": item.get("errorStatus")
+        } for item in response.get("items")}
 
         return jobs
 
     def get_all_jobs(self, run_id):
         return self.__get_api_url(self.__api_fail_job.format(run_id))
 
-    def get_error_message(self, subtask_id, limit=50, offset=0):
+    def get_error_message(self, subtask_id, limit=20, offset=0):
         """
         Позволяет получить список сообщений об ошибке у конкретной подзадачи.
 
         subtask_id : uuid подзадачи у раннера в задаче
         """
+        self.settings.connection_timeout = 180 #увеличиваю timeout
+
         # задача состоит из одной подзадачи если =0, иначе много подзадач
         items = self.__get_api_url(self.__api_error_messages.format(subtask_id, limit, offset))
         if self.__error_patterns is None:
             api_url = self.__api_error_pattern_messages_new.format(time.time()) \
-                    if int(self.__core_version.split('.')[0]) >= 25 \
-                    else self.__api_error_pattern_messages_old.format(time.time())
+                if int(self.__core_version.split('.')[0]) >= 25 \
+                else self.__api_error_pattern_messages_old.format(time.time())
             url = f"https://{self.__core_hostname}{api_url}"
             r = exec_request(self.__core_session, url, method='GET', timeout=self.settings.connection_timeout)
-            self.__error_patterns = json.loads(str(r.text).encode('utf-8'))
-
-        prefix, rows = "ScanErrorsLog.MessageErrorItem.Text", []
+            tmp_error_patterns = json.loads(str(r.text).encode('utf-8'))
+            self.__error_patterns = {
+                key.replace('_', '').replace('-', '').replace('.', '').lower(): tmp_error_patterns[key]
+                for key in tmp_error_patterns.keys()}
+        prefix, rows = "scanerrorslogmessageerroritemtext", []
         for item in items:
             params = item.get('parameters')
-            type_err = item['type'].replace('.', '')
-            if f"{prefix}.{type_err}" not in self.__error_patterns.keys() or params is None:
+            type_err = item['type'].replace('_', '').replace('-', '').replace('.', '').lower()
+            if f"{prefix}{type_err}" not in self.__error_patterns.keys() or params is None:
                 pattern = f"Произошла ошибка: {item['type']}"
             else:
-                pattern = self.__error_patterns[f"{prefix}.{type_err}"]
+                pattern = self.__error_patterns[f"{prefix}{type_err}"]
                 for param in params:
                     pattern = pattern.replace('{{' + param + '}}', str(params[param]))
-            rows.append({"time": item['occurredAt'], "source": item['sourceName'], "message": pattern})
+            rows.append({"time": item['occurredAt'], "source": item['sourceName'],
+                         "message": re.sub("\s\s+" , " ", pattern)})
 
         return rows
 
@@ -562,13 +543,15 @@ class Tasks(ModuleInterface, LoggingHandler):
         """
         tasks = self.get_tasks_list()
         history_job_list, job_list = None, None
-        for uuid_task in tasks: #находим нужную задачу по имени
+        for uuid_task in tasks:  # находим нужную задачу по имени
             if tasks[uuid_task]['name'] == task_name:
-                history_job_list = self.get_history_job_list(uuid_task, limit) #получения списка runner'ов (история перезапуска задачи)
-                job_list = self.get_all_jobs(list(history_job_list.keys())[0]) #берём последний runner и получаем список подзадач у него
+                history_job_list = self.get_history_job_list(uuid_task,
+                                                             limit)  # получения списка runner'ов (история перезапуска задачи)
+                job_list = self.get_all_jobs(
+                    list(history_job_list.keys())[0])  # берём последний runner и получаем список подзадач у него
                 break
         info_job = None
-        for job in job_list: #в подзадачах ищем адрес источника
+        for job in job_list:  # в подзадачах ищем адрес источника
             if target in job['targets']:
                 info_job = job
                 break
@@ -585,11 +568,13 @@ class Tasks(ModuleInterface, LoggingHandler):
         tasks = self.get_tasks_list()
         history_job_list, job_list = None, None
         for uuid_task in tasks:
-            if tasks[uuid_task]['name'] == task_name: #находим нужную задачу по имени
-                history_job_list = self.get_history_job_list(uuid_task, limit) #получения списка runner'ов (история перезапуска задачи)
-                job_list = self.get_all_jobs(list(history_job_list.keys())[0]) #берём последний runner и получаем список подзадач у него
+            if tasks[uuid_task]['name'] == task_name:  # находим нужную задачу по имени
+                history_job_list = self.get_history_job_list(uuid_task,
+                                                             limit)  # получения списка runner'ов (история перезапуска задачи)
+                job_list = self.get_all_jobs(
+                    list(history_job_list.keys())[0])  # берём последний runner и получаем список подзадач у него
                 break
-        return self.get_error_message(job_list[0]['id'], limit=limit, offset=offset) #берём самую первую подзадачу
+        return self.get_error_message(job_list[0]['id'], limit=limit, offset=offset)  # берём самую первую подзадачу
 
     def get_last_error_message_by_task_id(self, task_id, limit=50, offset=0):
         """
@@ -599,9 +584,11 @@ class Tasks(ModuleInterface, LoggingHandler):
         Args:
             task_id : uuid задачи
         """
-        history_job_list = self.get_history_job_list(task_id, limit) #получения списка runner'ов (история перезапуска задачи)
-        job_list = self.get_all_jobs(list(history_job_list.keys())[0]) #берём последний runner и получаем список подзадач у него
-        return self.get_error_message(job_list[0]['id'], limit=limit, offset=offset) #берём самую первую подзадачу
+        history_job_list = self.get_history_job_list(task_id,
+                                                     limit)  # получения списка runner'ов (история перезапуска задачи)
+        job_list = self.get_all_jobs(
+            list(history_job_list.keys())[0])  # берём последний runner и получаем список подзадач у него
+        return self.get_error_message(job_list[0]['id'], limit=limit, offset=offset)  # берём самую первую подзадачу
 
     def get_last_error_message_by_task_id_and_targets(self, task_id, target, limit=50, offset=0):
         """
@@ -612,11 +599,13 @@ class Tasks(ModuleInterface, LoggingHandler):
             task_id : имя задачи
             target : адрес или fqdn источника
         """
-        history_job_list = self.get_history_job_list(task_id, limit) #получения списка runner'ов (история перезапуска задачи)
-        job_list = self.get_all_jobs(list(history_job_list.keys())[0]) #берём последний runner и получаем список подзадач у него
+        history_job_list = self.get_history_job_list(task_id,
+                                                     limit)  # получения списка runner'ов (история перезапуска задачи)
+        job_list = self.get_all_jobs(
+            list(history_job_list.keys())[0])  # берём последний runner и получаем список подзадач у него
         info_job = None
         for job in job_list:
-            if target in job['targets']: #в подзадачах ищем адрес источника
+            if target in job['targets']:  # в подзадачах ищем адрес источника
                 info_job = job
                 break
         return self.get_error_message(info_job['id'], limit=limit, offset=offset)
