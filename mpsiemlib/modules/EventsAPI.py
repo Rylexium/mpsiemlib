@@ -11,6 +11,7 @@ class EventsAPI(ModuleInterface, LoggingHandler):
     __api_events = '/api/events/v2/events?limit={}&offset={}'
     __api_events_for_incident = '/api/events/v2/events/?incidentId={}&limit={}&offset={}'
     __api_events_aggregate = "/api/events/v2/events/aggregation?offset=0"
+    __api_events_count_distinct_field_values = "/api/events/v2/events/count_distinct_field_values"
 
     class Distribute:
         period_1min, period_5min, period_10min, period_30min = '1m', '5m', '10m', '30m'
@@ -91,16 +92,16 @@ class EventsAPI(ModuleInterface, LoggingHandler):
                 "select": ["time", "event_src.host", "text"],
                 "where": filter,
                 "orderBy": [{
-                        "field": "time",
-                        "sortOrder": "descending"
-                    }
+                    "field": "time",
+                    "sortOrder": "descending"
+                }
                 ],
                 "groupBy": group_by_fields,
                 "aggregateBy": [{
-                        "function": "COUNT",
-                        "field": "*",
-                        "unique": false
-                    }
+                    "function": "COUNT",
+                    "field": "*",
+                    "unique": false
+                }
                 ],
                 "distributeBy": [],
                 "top": 10000,
@@ -114,9 +115,9 @@ class EventsAPI(ModuleInterface, LoggingHandler):
                 "searchSources": null,
                 "localSources": null,
                 "groupByOrder": [{
-                        "field": "count",
-                        "sortOrder": "Descending"
-                    }
+                    "field": "count",
+                    "sortOrder": "Descending"
+                }
                 ],
                 "showNullGroups": true
             },
@@ -134,12 +135,12 @@ class EventsAPI(ModuleInterface, LoggingHandler):
                            'has wrong response structure", '
                            'hostname="{}"'.format(self.__core_hostname))
             raise Exception('Core data request return None or has wrong response structure')
-        
-        return {' | '.join(e['groups']):int(e['values'][0]) for e in response['rows']}
+
+        return {' | '.join(e['groups']): int(e['values'][0]) for e in response['rows']}
 
     def get_events_by_filter(self, filter, fields, time_from, time_to, limit, offset) -> dict:
         """
-        Получить события по фильру 
+        Получить события по фильру
 
         Args:
             filter : фильтр на языке PDQL
@@ -147,9 +148,9 @@ class EventsAPI(ModuleInterface, LoggingHandler):
             time_from : начало диапазона поиска (Unix timestamp в секундах)
             time_to : конец диапазона поиска (Unix timestamp в секундах)
             limit: число запрашиваемых событий, соответсвующих фильтру
-            offset: позиция, начиная с которой возвращать требуемое число событий, соответсвующих фильтру 
+            offset: позиция, начиная с которой возвращать требуемое число событий, соответсвующих фильтру
         Returns:
-            [type]: массив событий 
+            [type]: массив событий
         """
         null = None
         params = {
@@ -189,7 +190,7 @@ class EventsAPI(ModuleInterface, LoggingHandler):
 
     def get_events_for_incident(self, fields, incident_id, time_from, time_to, limit, offset):
         """
-        Получить события, связанные с инцидентом 
+        Получить события, связанные с инцидентом
 
         Args:
             fields : список запрашиваемых полей событий
@@ -199,7 +200,7 @@ class EventsAPI(ModuleInterface, LoggingHandler):
             limit: число запрашиваемых событий, связанных с инцидентом
             offset: позиция, начиная с которой возвращать требуемое число событий, связанны с инцидентом
         Returns:
-            [type]: массив событий 
+            [type]: массив событий
         """
         null = None
         params = {
@@ -358,6 +359,52 @@ class EventsAPI(ModuleInterface, LoggingHandler):
             raise Exception("Core data request return None or has wrong response structure")
 
         return {'|'.join([field for field in row['groups']]): {response.get('columns')[column]: row['values'][column]
-                                                              for column in range(len(response.get('columns')))}
-               for row in response.get("rows")}
+                                                               for column in range(len(response.get('columns')))}
+                for row in response.get("rows")}
 
+    def get_count_distinct_field_values(self, filter, fields, time_from, time_to, top=None):
+        """
+            Получить количество уникальных значений в поле(полях) и количество их появления у конкретного значения
+
+            Args:
+                Обязательные параметры:
+                    filter : фильтр на языке PDQL
+                    fields : поле(я) поиска уникальных значений
+                    time_from : начало диапазона поиска (Unix timestamp в секундах)
+                    time_to : конец диапазона поиска (Unix timestamp в секундах)
+                Необязательные параметры:
+                    top: взять первые top значений (если None, то возьмёт сколько сможет)
+            Returns:
+                [type]: список значений и количество сколько событий имеет это значение
+            Example request:
+                {
+                    "timeFrom": 1707940800,
+                    "timeTo": 1708027200,
+                    "filter": "(src.ip=10.19.165.95 or event_src.ip=10.19.165.95 or recv_ipv4=10.19.165.95)",
+                    "fields": ["subject.name"],
+                    "top": null
+                }
+            Example result:
+                [{"values": ["ivanov-ii"], "count": 5522},
+                 {"values": ["kirov-sv"], "count": 6},
+                 {"values": [], "count": 9349}]
+            """
+        params = {
+            "timeFrom": time_from,
+            "timeTo": time_to,
+            "filter": filter,
+            "fields": fields,
+            "top": top
+        }
+        url = f"https://{self.__core_hostname}{self.__api_events_count_distinct_field_values}"
+        rq = exec_request(self.__core_session, url, method="POST", json=params)
+        response = rq.json()
+
+        result = []
+        for line in response:
+            values = line['values']
+            d = {fields[i]: values[i] for i in range(len(fields))}
+            d['count'] = line['count']
+            result.append(d)
+
+        return result
