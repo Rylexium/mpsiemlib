@@ -433,7 +433,7 @@ class EventsAPI(ModuleInterface, LoggingHandler):
 
         for line in rows:
             values = line['values' if core_version < 25 else 'groups']
-            d = {fields[i]: "None" if len(rows) == 0 else values[i] for i in range(len(fields))}
+            d = {fields[i]: "None" if len(values) == 0 else values[i] for i in range(len(fields))}
             d['count'] = line['count'] if core_version < 25 else int(sum(line['values']))
             result.append(d)
 
