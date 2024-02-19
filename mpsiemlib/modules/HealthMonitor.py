@@ -257,6 +257,13 @@ class HealthMonitor(ModuleInterface, LoggingHandler):
                 # {threshold, bytes}        v.25-v.26
                 if param == 'threshold':
                     params[param] = self.__humanbytes(params[param])
+                    pattern = pattern.replace("{{" + str(param) + " | bytes}}", params[param])\
+                        .replace("{" + str(param) + " | bytes}", params[param]) \
+                        .replace("{{" + str(param) + ", bytes}}", params[param]) \
+                        .replace("{" + str(param) + ", bytes}", params[param]) \
+                        .replace("{{" + str(param) + " , bytes}}", params[param]) \
+                        .replace("{" + str(param) + " , bytes}", params[param])
+
                 pattern = pattern.replace("{" + param + "}", str(params[param]))\
                     .replace("{" + str(params[param]) + "}", str(params[param]))
 

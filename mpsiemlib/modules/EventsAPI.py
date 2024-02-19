@@ -30,6 +30,7 @@ class EventsAPI(ModuleInterface, LoggingHandler):
         LoggingHandler.__init__(self)
         self.__core_session = auth.connect(MPComponents.CORE)
         self.__core_hostname = auth.creds.core_hostname
+        self.__core_version = auth.get_core_version()
         self.log.debug('status=success, action=prepare, msg="EventsUI Module init"')
 
     def get_event_details(self, event_id, event_date) -> dict:
@@ -80,9 +81,9 @@ class EventsAPI(ModuleInterface, LoggingHandler):
             time_from : начало диапазона поиска (Unix timestamp в секундах)
             time_to : конец диапазона поиска (Unix timestamp в секундах)
             limit: число запрашиваемых событий, соответсвующих фильтру
-            offset: позиция, начиная с которой возвращать требуемое число событий, соответсвующих фильтру 
+            offset: позиция, начиная с которой возвращать требуемое число событий, соответсвующих фильтру
         Returns:
-            [type]: массив событий 
+            [type]: массив событий
         """
         null = None
         false = False
@@ -385,26 +386,113 @@ class EventsAPI(ModuleInterface, LoggingHandler):
                     "top": null
                 }
             Example result:
-                [{"values": ["ivanov-ii"], "count": 5522},
-                 {"values": ["kirov-sv"], "count": 6},
-                 {"values": [], "count": 9349}]
+                [{'subject.name': 'ivanov-ia', 'count': 420}, {'subject.name': 'pc18$', 'count': 200},
+                {'subject.name': 'apache', 'count': 4}, {'subject.name': 'None', 'count': 958}]
             """
-        params = {
-            "timeFrom": time_from,
-            "timeTo": time_to,
-            "filter": filter,
-            "fields": fields,
-            "top": top
-        }
-        url = f"https://{self.__core_hostname}{self.__api_events_count_distinct_field_values}"
+        core_version = int(self.__core_version.split('.')[0])
+        if core_version < 25:
+            params = {
+                "timeFrom": time_from,
+                "timeTo": time_to,
+                "filter": filter,
+                "fields": fields,
+                "searchSources": [],
+                "searchType": "local",
+                "top": top
+            }
+            url = f"https://{self.__core_hostname}{self.__api_events_count_distinct_field_values}"
+        else:
+            params = {
+                "filter": {
+                    "select": ["time"],
+                    "where": filter,
+                    "orderBy": [{"field": "time", "sortOrder": "descending"}],
+                    "groupBy": fields,
+                    "aggregateBy": [{"function": "COUNT", "field": "*", "unique": False}],
+                    "distributeBy": [],
+                    "top": top,
+                    "aliases": {"select": None, "groupBy": {}, "aggregateBy": {"COUNT": "Cnt"}},
+                    "searchType": None,
+                    "searchSources": None,
+                    "localSources": None,
+                    "showNullGroups": False
+                },
+                "timeFrom": time_from,
+                "timeTo": time_to
+            }
+            url = f"https://{self.__core_hostname}{self.__api_events_aggregate}"
         rq = exec_request(self.__core_session, url, method="POST", json=params)
         response = rq.json()
 
-        result = []
-        for line in response:
-            values = line['values']
+        result, rows = [], []
+        if core_version < 25:
+            rows = response
+        else:
+            if response.get('rows') is not None:
+                rows = response['rows']
+
+        for line in rows:
+            values = line['values' if core_version < 25 else 'groups']
             d = {fields[i]: "None" if len(values) == 0 else values[i] for i in range(len(fields))}
-            d['count'] = line['count']
+            d['count'] = line['count'] if core_version < 25 else int(sum(line['values']))
             result.append(d)
 
         return result
+
+    def get_events_by_filter_aggregation(self, filter, groupBy, aggregateBy, distributeBy, time_from, time_to,
+                                         offset, top) -> dict:
+        """
+        Получить агрегированные события по фильру
+
+        Args:
+            filter : фильтр на языке PDQL
+            time_from : начало диапазона поиска (Unix timestamp в секундах)
+            aggregateBy : правила агрегации
+            groupBy : поле группировки
+            time_to : конец диапазона поиска (Unix timestamp в секундах)
+            limit: число запрашиваемых событий, соответсвующих фильтру
+            offset: позиция, начиная с которой возвращать требуемое число событий, соответсвующих фильтру
+        Returns:
+            [type]: массив событий
+        Example_aggregateBy:
+            {"function":"COUNT","field":"dst.ip","unique":true}
+        Example_groupBy:
+            ["src.ip"]
+        """
+        null = None
+        params = {
+            "filter": {
+                "select": ['time'],
+                "where": f"{filter}",
+                "orderBy": [
+                    {
+                        "field": "time",
+                        "sortOrder": "descending"
+                    }
+                ],
+                "groupBy": groupBy,
+                "aggregateBy": aggregateBy,
+                "distributeBy": null if distributeBy == null else distributeBy,
+                "top": top,
+                "aliases": {
+                    "groupBy": {},
+                    "aggregateBy": null,
+                    "select": null
+                }
+            },
+            "timeFrom": time_from,
+            "timeTo": time_to
+        }
+        api_url = self.__api_events_aggregate.format(offset)
+        url = "https://{}{}".format(self.__core_hostname, api_url)
+
+        rq = exec_request(self.__core_session, url, method="POST", json=params)
+        response = rq.json()
+
+        if response is None or "rows" not in response:
+            self.log.error(
+                'status=failed, action=get_events_by_filter_aggregation, msg="Core data request return None or '
+                'has wrong response structure", '
+                'hostname="{}"'.format(self.__core_hostname))
+            raise Exception("Core data request return None or has wrong response structure")
+        return response.get("rows")
