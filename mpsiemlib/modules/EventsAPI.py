@@ -81,9 +81,9 @@ class EventsAPI(ModuleInterface, LoggingHandler):
             time_from : начало диапазона поиска (Unix timestamp в секундах)
             time_to : конец диапазона поиска (Unix timestamp в секундах)
             limit: число запрашиваемых событий, соответсвующих фильтру
-            offset: позиция, начиная с которой возвращать требуемое число событий, соответсвующих фильтру
+            offset: позиция, начиная с которой возвращать требуемое число событий, соответсвующих фильтру 
         Returns:
-            [type]: массив событий
+            [type]: массив событий 
         """
         null = None
         false = False
@@ -93,16 +93,16 @@ class EventsAPI(ModuleInterface, LoggingHandler):
                 "select": ["time", "event_src.host", "text"],
                 "where": filter,
                 "orderBy": [{
-                    "field": "time",
-                    "sortOrder": "descending"
-                }
+                        "field": "time",
+                        "sortOrder": "descending"
+                    }
                 ],
                 "groupBy": group_by_fields,
                 "aggregateBy": [{
-                    "function": "COUNT",
-                    "field": "*",
-                    "unique": false
-                }
+                        "function": "COUNT",
+                        "field": "*",
+                        "unique": false
+                    }
                 ],
                 "distributeBy": [],
                 "top": 10000,
@@ -116,9 +116,9 @@ class EventsAPI(ModuleInterface, LoggingHandler):
                 "searchSources": null,
                 "localSources": null,
                 "groupByOrder": [{
-                    "field": "count",
-                    "sortOrder": "Descending"
-                }
+                        "field": "count",
+                        "sortOrder": "Descending"
+                    }
                 ],
                 "showNullGroups": true
             },
@@ -136,12 +136,12 @@ class EventsAPI(ModuleInterface, LoggingHandler):
                            'has wrong response structure", '
                            'hostname="{}"'.format(self.__core_hostname))
             raise Exception('Core data request return None or has wrong response structure')
+        
+        return {' | '.join(e['groups']):int(e['values'][0]) for e in response['rows']}
 
-        return {' | '.join(e['groups']): int(e['values'][0]) for e in response['rows']}
-
-    def get_events_by_filter(self, filter, fields, time_from, time_to, limit, offset) -> dict:
+    def get_events_by_filter(self, filter, fields, time_from, time_to, limit, offset) -> list:
         """
-        Получить события по фильру
+        Получить события по фильру 
 
         Args:
             filter : фильтр на языке PDQL
@@ -149,9 +149,9 @@ class EventsAPI(ModuleInterface, LoggingHandler):
             time_from : начало диапазона поиска (Unix timestamp в секундах)
             time_to : конец диапазона поиска (Unix timestamp в секундах)
             limit: число запрашиваемых событий, соответсвующих фильтру
-            offset: позиция, начиная с которой возвращать требуемое число событий, соответсвующих фильтру
+            offset: позиция, начиная с которой возвращать требуемое число событий, соответсвующих фильтру 
         Returns:
-            [type]: массив событий
+            [type]: массив событий 
         """
         null = None
         params = {
@@ -187,11 +187,11 @@ class EventsAPI(ModuleInterface, LoggingHandler):
                            'has wrong response structure", '
                            'hostname="{}"'.format(self.__core_hostname))
             raise Exception('Core data request return None or has wrong response structure')
-        return response.get('events')
+        return [response.get('events'), response.get('totalCount')]
 
     def get_events_for_incident(self, fields, incident_id, time_from, time_to, limit, offset):
         """
-        Получить события, связанные с инцидентом
+        Получить события, связанные с инцидентом 
 
         Args:
             fields : список запрашиваемых полей событий
@@ -201,7 +201,7 @@ class EventsAPI(ModuleInterface, LoggingHandler):
             limit: число запрашиваемых событий, связанных с инцидентом
             offset: позиция, начиная с которой возвращать требуемое число событий, связанны с инцидентом
         Returns:
-            [type]: массив событий
+            [type]: массив событий 
         """
         null = None
         params = {
@@ -360,8 +360,8 @@ class EventsAPI(ModuleInterface, LoggingHandler):
             raise Exception("Core data request return None or has wrong response structure")
 
         return {'|'.join([field for field in row['groups']]): {response.get('columns')[column]: row['values'][column]
-                                                               for column in range(len(response.get('columns')))}
-                for row in response.get("rows")}
+                                                              for column in range(len(response.get('columns')))}
+               for row in response.get("rows")}
 
     def get_count_distinct_field_values(self, filter, fields, time_from, time_to, top=None):
         """
@@ -416,7 +416,7 @@ class EventsAPI(ModuleInterface, LoggingHandler):
                     "searchSources": None,
                     "localSources": None,
                     "showNullGroups": False
-                },
+                  },
                 "timeFrom": time_from,
                 "timeTo": time_to
             }
