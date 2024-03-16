@@ -28,6 +28,9 @@ class Assets(ModuleInterface, LoggingHandler):
     __api_assets_v1_removeassets = "/api/assets_processing/v1/asset_operations/removeAssets"
     __api_assets_v1_assetsid = "/api/v1/asset/state/?assetsId=00000000-0000-0000-0000-000000000000"
 
+    __api_assets_v1_passport = "/api/assets_temporal_readmodel/v1/assets_info/{}/passport"
+    __api_assets_trm_readmodel_groups = "/api/assets_temporal_readmodel/v2/groups/{}"
+
     def __init__(self, auth: MPSIEMAuth, settings: Settings):
         ModuleInterface.__init__(self, auth, settings)
         LoggingHandler.__init__(self)
@@ -425,7 +428,8 @@ class Assets(ModuleInterface, LoggingHandler):
 
         return resp
 
-    def create_group_dynamic(self, parent_id: str, group_name: str, predicate: str) -> str:
+    def create_group_dynamic(self, parent_id: str, group_name: str, predicate: str, metrics: dict=None,
+                            organization_info: dict=None, organization_infra: dict=None) -> str:
         """
         Создать динамическую группу
 
@@ -439,11 +443,12 @@ class Assets(ModuleInterface, LoggingHandler):
                        'hostname="{}"'.format(self.__core_hostname))
 
         url = "https://{}{}".format(self.__core_hostname, self.__api_assets_processing_v2_groups)
+        default_metrics = {"td": "ND", "cdp": "ND", "cr": "ND", "ir": "ND", "ar": "ND"}
         params = {"name": group_name, "parentId": parent_id, "groupType": "dynamic",
                   "predicate": predicate,
-                  "metrics": {"td": "ND", "cdp": "ND", "cr": "ND", "ir": "ND", "ar": "ND"},
-                  "organizationInformation": {},
-                  "organizationInfrastructure": {}}
+                  "metrics": default_metrics if metrics is None else metrics,
+                  "organizationInformation": {} if organization_info is None else organization_info,
+                  "organizationInfrastructure": {} if organization_infra is None else organization_infra}
 
         r = exec_request(self.__core_session,
                          url,
@@ -464,7 +469,8 @@ class Assets(ModuleInterface, LoggingHandler):
 
         return group_id
 
-    def create_group_static(self, parent_id: str, group_name: str) -> str:
+    def create_group_static(self, parent_id: str, group_name: str, metrics: dict=None,
+                            organization_info: dict=None, organization_infra: dict=None) -> str:
         """
         Создать статическую группу
 
@@ -477,10 +483,11 @@ class Assets(ModuleInterface, LoggingHandler):
                        'hostname="{}"'.format(self.__core_hostname))
 
         url = "https://{}{}".format(self.__core_hostname, self.__api_assets_processing_v2_groups)
+        default_metrics = {"td": "ND", "cdp": "ND", "cr": "ND", "ir": "ND", "ar": "ND"}
         params = {"name": group_name, "parentId": parent_id, "groupType": "static",
-                  "metrics": {"td": "ND", "cdp": "ND", "cr": "ND", "ir": "ND", "ar": "ND"},
-                  "organizationInformation": {},
-                  "organizationInfrastructure": {}}
+                  "metrics": default_metrics if metrics is None else metrics,
+                  "organizationInformation": {} if organization_info is None else organization_info,
+                  "organizationInfrastructure": {} if organization_infra is None else organization_infra}
 
         r = exec_request(self.__core_session,
                          url,
@@ -619,13 +626,20 @@ class Assets(ModuleInterface, LoggingHandler):
     def __iterate_groups_tree(self, root_node, parent_id=None):
         for i in root_node:
             node_id = i.get("id")
+            url = f"https://{self.__core_hostname}{self.__api_assets_trm_readmodel_groups.format(node_id)}"
+            r = exec_request(self.__core_session,
+                             url,
+                             method='GET',
+                             timeout=self.settings.connection_timeout)
+            resp = r.json()
             self.__groups[node_id] = {"parent_id": parent_id,
                                       "name": i.get("name"),
                                       "type": i.get("groupType"),
                                       "is_readonly": i.get("isReadOnly", False),
                                       "is_removable": i.get("isRemovable", False),
                                       "is_invalid_predicate": i.get("isInvalidPredicate", False),
-                                      "is_slow": i.get("isSlow", False)}
+                                      "is_slow": i.get("isSlow", False),
+                                      "more": resp}
             node_children = i.get("children")
             if node_children is not None and len(node_children) != 0:
                 self.__iterate_groups_tree(node_children, node_id)
