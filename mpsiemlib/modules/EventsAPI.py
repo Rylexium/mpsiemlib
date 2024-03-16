@@ -472,6 +472,10 @@ class EventsAPI(ModuleInterface, LoggingHandler):
                     func = f"{agg_func.upper()}UNIQUE" if aggregateBy[0]["unique"] is True else agg_func.upper()
                     break
 
+            result = re.findall(r'in_subnet\s*\([^,]+,\s*["\']([^"\']+)["\']\)', filter)
+            for match in result:
+                filter = filter.replace(f"\'{match}\'", match).replace(f"\"{match}\"", match)
+
             pdql_query_filter = f"filter({filter}) | select(time) | sort(time desc) | "
             pdql_query_option = f"""group(key: {groupBy},  
                                           agg: {func}({", ".join([agg["field"] for agg in aggregateBy])}) as Cnt, 
