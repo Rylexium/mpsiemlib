@@ -1,7 +1,9 @@
 import json
 import re
 import time
+import traceback
 from typing import Optional
+from uuid import UUID
 
 from mpsiemlib.common import ModuleInterface, MPSIEMAuth, LoggingHandler, MPComponents, Settings
 from mpsiemlib.common import exec_request
@@ -32,6 +34,9 @@ class Tasks(ModuleInterface, LoggingHandler):
     __api_fail_job = "/api/scanning/v2/runs/{}/jobs?limit=50&orderby=startedAt+desc"
     __api_error_pattern_messages_new = "/ng1/Content/locales/l10n/ru-RU/external/scan-errors-log.json?{}"  # R25
     __api_error_pattern_messages_old = "/Content/locales/l10n/ru-RU/external/scan-errors-log.json?{}"  # R23 - R24
+    __api_credentials_login_password = "/api/v3/credentials/login_passwords" # v25
+    __api_credentials_certificate = "/api/v3/credentials/certificates" # v25
+    __api_credentials_password_only = "/api/v3/credentials/passwords_only"
 
     def __init__(self, auth: MPSIEMAuth, settings: Settings):
         ModuleInterface.__init__(self, auth, settings)
@@ -171,16 +176,8 @@ class Tasks(ModuleInterface, LoggingHandler):
                          timeout=self.settings.connection_timeout)
         response = r.json()
 
-        for i in response:
-            # почему-то ID выглядит как "{2341234-1234-234-2388}" - исправлено в R24
-            base_profile = i.get('baseProfileName')
-            profile_id = i.get('id', '').replace('{', '').replace('}', '')  # исправлено в R24
-            self.__profiles[profile_id] = {'name': i.get('name'),
-                                           'system': i.get('isSystem'),
-                                           'base_profile': base_profile.replace('"', '') if base_profile else None,
-                                           'module_id': i.get('moduleId'),
-                                           'output': i.get('output')
-                                           }
+        # почему-то ID выглядит как "{8406e439-9402-4fad-893e-583009d8e797}" - в R23
+        self.__profiles = {profile.get('id', '').replace('{', '').replace('}', ''): profile for profile in response}
 
         self.log.info('status=success, action=get_profiles_list, msg="Got profiles list", '
                       'hostname="{}", count={}'.format(self.__core_hostname, len(self.__profiles)))
@@ -239,8 +236,9 @@ class Tasks(ModuleInterface, LoggingHandler):
 
         for i in response:
             self.__credentials[i.get('id')] = {'name': i.get('name'),
-                                               'type': i.get('id'),
+                                               'type': i.get('type'),
                                                'description': i.get('description'),
+                                               'credential_tags': i.get('credentialTags'),
                                                'transports': i.get('metatransports'),
                                                }
 
@@ -282,6 +280,7 @@ class Tasks(ModuleInterface, LoggingHandler):
                                          'run_last_error': i.get('lastRunError'),
                                          'target_include': i.get('include'),
                                          'target_exclude': i.get('exclude'),
+                                         "is_fqdn_priority": i.get("isFqdnPriority"),
                                          'status_validation': i.get('validationState'),
                                          'host_discovery': i.get('hostDiscovery'),
                                          'bookmarks': i.get('hasBookmarks'),
@@ -619,6 +618,100 @@ class Tasks(ModuleInterface, LoggingHandler):
             job_id : uuid подзадачи
        """
         return self.get_error_message(job_id, limit=limit, offset=offset)
+
+    def get_profile_info(self, profile_id):
+        if not self.__is_uuid(profile_id):
+            return None
+
+        __url_api_profile = None
+        if int(self.__core_version.split('.')[0]) == 23:
+            self.__api_profiles_list = self.__api_profiles_list_old
+        else:
+            self.__api_profiles_list = self.__api_profiles_list_new
+
+        url = f"https://{self.__core_hostname}{self.__api_profiles_list_new}/{profile_id}"
+        r = exec_request(self.__core_session,
+                         url,
+                         method='GET',
+                         timeout=self.settings.connection_timeout)
+        response = r.json()
+        return response
+
+    def add_login_password_credentials(self, name: str, login: str, password: str, domain: str, description: str, credential_tags: list):
+        url = f"https://{self.__core_hostname}{self.__api_credentials_login_password}"
+        r = exec_request(self.__core_session, url,
+                         method="POST", timeout=self.settings.connection_timeout,
+                         json={
+                             "credentialTags": credential_tags,
+                             "description": description,
+                             "domain": domain,
+                             "login": login,
+                             "name": name,
+                             "password": password
+                         })
+        response = r.json()
+        return response.get("id")
+
+    def add_certificate_credentials(self, name: str, login: str, certificate: str, description: str, credential_tags: list):
+        url = f"https://{self.__core_hostname}{self.__api_credentials_certificate}"
+        r = exec_request(self.__core_session, url,
+                         method="POST", timeout=self.settings.connection_timeout,
+                         json={
+                             "credentialTags": credential_tags,
+                             "description": description,
+                             "login": login,
+                             "name": name,
+                             "certificate": certificate
+                         })
+        response = r.json()
+        return response.get("id")
+
+    def add_password_only_credentials(self, name: str, password: str, description: str, credential_tags: list):
+        url = f"https://{self.__core_hostname}{self.__api_credentials_password_only}"
+        r = exec_request(self.__core_session, url,
+                         method="POST", timeout=self.settings.connection_timeout,
+                         json={
+                             "credentialTags": credential_tags,
+                             "description": description,
+                             "name": name,
+                             "password": password
+                         })
+        response = r.json()
+        return response.get("id")
+
+    def __wrapper_get_credentials(self, api_url, credential_id):
+        if not self.__is_uuid(credential_id):
+            return None
+
+        url = f"https://{self.__core_hostname}{api_url}/{credential_id}"
+        r = exec_request(self.__core_session, url, method="GET", timeout=self.settings.connection_timeout)
+        return r.json()
+
+    def get_credentials_login_password(self, credential_id):
+        return self.__wrapper_get_credentials(self.__api_credentials_login_password, credential_id)
+
+    def get_credentials_certificate(self, credential_id):
+        return self.__wrapper_get_credentials(self.__api_credentials_certificate, credential_id)
+
+    def get_credentials_password_only(self, credential_id):
+        return self.__wrapper_get_credentials(self.__api_credentials_password_only, credential_id)
+
+    def delete_credentials(self, credential_id):
+        if not self.__is_uuid(credential_id):
+            return None
+
+        url = f"https://{self.__core_hostname}{self.__api_credentials_login_password}/{credential_id}"
+        r = exec_request(self.__core_session, url, method="DELETE", timeout=self.settings.connection_timeout)
+        response = r.json()
+        return response
+
+    @staticmethod
+    def __is_uuid(value_uuid):
+        try:
+            return str(UUID(value_uuid)) == value_uuid
+        except:
+            return False
+
 
     def close(self):
         if self.__core_session is not None:
