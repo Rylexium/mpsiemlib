@@ -468,7 +468,7 @@ class EventsAPI(ModuleInterface, LoggingHandler):
         if core_version > 25:
             func = None
             for agg_func in self.Aggregation.all_function:
-                if agg_func.lower() == aggregateBy[0]['function']:
+                if agg_func.lower() == str(aggregateBy[0]['function']).lower():
                     func = f"{agg_func.upper()}UNIQUE" if aggregateBy[0]["unique"] is True else agg_func.upper()
                     break
 
