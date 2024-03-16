@@ -12,6 +12,8 @@ class Filters(ModuleInterface, LoggingHandler):
     __api_folders = '/api/v2/events/folders'
     __api_filters = '/api/v2/events/filters'
 
+    __api_filter_info_v3 = "/api/v3/events/filters/{}"
+
     def __init__(self, auth: MPSIEMAuth, settings: Settings):
         ModuleInterface.__init__(self, auth, settings)
         LoggingHandler.__init__(self)
@@ -177,6 +179,17 @@ class Filters(ModuleInterface, LoggingHandler):
                          json=filter)
         self.get_folders_list(is_force_update=True)
         return r.json()
+
+    def get_filter_info_v3(self, filter_id):
+        url = f'https://{self.__core_hostname}{self.__api_filter_info_v3.format(filter_id)}'
+
+        r = exec_request(self.__core_session, url, method='GET', timeout=self.settings.connection_timeout)
+        filter_info = r.json()
+
+        self.log.info('status=success, action=get_filter_info, msg="Got info for filter {}", '
+                      'hostname="{}"'.format(filter_id, self.__core_hostname))
+
+        return filter_info
 
     def close(self):
         if self.__core_session is not None:

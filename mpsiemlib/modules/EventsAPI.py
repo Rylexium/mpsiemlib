@@ -1,3 +1,5 @@
+import re
+
 from mpsiemlib.common import ModuleInterface, MPSIEMAuth, MPComponents, LoggingHandler, Settings
 from mpsiemlib.common import exec_request
 
@@ -12,6 +14,9 @@ class EventsAPI(ModuleInterface, LoggingHandler):
     __api_events_for_incident = '/api/events/v2/events/?incidentId={}&limit={}&offset={}'
     __api_events_aggregate = "/api/events/v2/events/aggregation?offset=0"
     __api_events_count_distinct_field_values = "/api/events/v2/events/count_distinct_field_values"
+
+    __api_events_aggregate_v3 = "/api/events/v3/events/aggregation"
+    __api_events_v3 = "/api/events/v3/events?limit={}&offset={}"
 
     class Distribute:
         period_1min, period_5min, period_10min, period_30min = '1m', '5m', '10m', '30m'
@@ -93,16 +98,16 @@ class EventsAPI(ModuleInterface, LoggingHandler):
                 "select": ["time", "event_src.host", "text"],
                 "where": filter,
                 "orderBy": [{
-                    "field": "time",
-                    "sortOrder": "descending"
-                }
+                        "field": "time",
+                        "sortOrder": "descending"
+                    }
                 ],
                 "groupBy": group_by_fields,
                 "aggregateBy": [{
-                    "function": "COUNT",
-                    "field": "*",
-                    "unique": false
-                }
+                        "function": "COUNT",
+                        "field": "*",
+                        "unique": false
+                    }
                 ],
                 "distributeBy": [],
                 "top": 10000,
@@ -116,9 +121,9 @@ class EventsAPI(ModuleInterface, LoggingHandler):
                 "searchSources": null,
                 "localSources": null,
                 "groupByOrder": [{
-                    "field": "count",
-                    "sortOrder": "Descending"
-                }
+                        "field": "count",
+                        "sortOrder": "Descending"
+                    }
                 ],
                 "showNullGroups": true
             },
@@ -137,7 +142,7 @@ class EventsAPI(ModuleInterface, LoggingHandler):
                            'hostname="{}"'.format(self.__core_hostname))
             raise Exception('Core data request return None or has wrong response structure')
 
-        return {' | '.join(e['groups']): int(e['values'][0]) for e in response['rows']}
+        return {' | '.join(e['groups']):int(e['values'][0]) for e in response['rows']}
 
     def get_events_by_filter(self, filter, fields, time_from, time_to, limit, offset) -> list:
         """
@@ -360,8 +365,8 @@ class EventsAPI(ModuleInterface, LoggingHandler):
             raise Exception("Core data request return None or has wrong response structure")
 
         return {'|'.join([field for field in row['groups']]): {response.get('columns')[column]: row['values'][column]
-                                                               for column in range(len(response.get('columns')))}
-                for row in response.get("rows")}
+                                                              for column in range(len(response.get('columns')))}
+               for row in response.get("rows")}
 
     def get_count_distinct_field_values(self, filter, fields, time_from, time_to, top=None):
         """
@@ -416,7 +421,7 @@ class EventsAPI(ModuleInterface, LoggingHandler):
                     "searchSources": None,
                     "localSources": None,
                     "showNullGroups": False
-                },
+                  },
                 "timeFrom": time_from,
                 "timeTo": time_to
             }
@@ -459,26 +464,35 @@ class EventsAPI(ModuleInterface, LoggingHandler):
         Example_groupBy:
             ["src.ip"]
         """
+        core_version = int(self.__core_version.split('.')[0])
+        if core_version > 25:
+            func = None
+            for agg_func in self.Aggregation.all_function:
+                if agg_func.lower() == aggregateBy[0]['function']:
+                    func = f"{agg_func.upper()}UNIQUE" if aggregateBy[0]["unique"] is True else agg_func.upper()
+                    break
+
+            pdql_query_filter = f"filter({filter}) | select(time) | sort(time desc) | "
+            pdql_query_option = f"""group(key: {groupBy},  
+                                          agg: {func}({", ".join([agg["field"] for agg in aggregateBy])}) as Cnt, 
+                                          timespan: time by {distributeBy[0]['granularity']}) 
+                                          | sort(Cnt desc) | limit({top})"""\
+                .replace('\'', '').replace("\"", '').replace('\n', '')
+            pdql_query_option = re.sub("\s\s+" , " ", pdql_query_option)
+            pdql_query = f"{pdql_query_filter}{pdql_query_option}"
+            return self.get_events_by_filter_aggregation_v3(pdql_query=pdql_query, time_from=time_from, time_to=time_to)
+
         null = None
         params = {
             "filter": {
                 "select": ['time'],
                 "where": f"{filter}",
-                "orderBy": [
-                    {
-                        "field": "time",
-                        "sortOrder": "descending"
-                    }
-                ],
+                "orderBy": [{"field": "time", "sortOrder": "descending"}],
                 "groupBy": groupBy,
                 "aggregateBy": aggregateBy,
                 "distributeBy": null if distributeBy == null else distributeBy,
                 "top": top,
-                "aliases": {
-                    "groupBy": {},
-                    "aggregateBy": null,
-                    "select": null
-                }
+                "aliases": {"groupBy": {}, "aggregateBy": null, "select": null}
             },
             "timeFrom": time_from,
             "timeTo": time_to
@@ -496,3 +510,41 @@ class EventsAPI(ModuleInterface, LoggingHandler):
                 'hostname="{}"'.format(self.__core_hostname))
             raise Exception("Core data request return None or has wrong response structure")
         return response.get("rows")
+
+    def get_events_by_filter_aggregation_v3(self, pdql_query, time_from, time_to):
+        params = {
+            "filter": pdql_query,
+            "timeFrom": time_from,
+            "timeTo": time_to
+        }
+
+        url = f"https://{self.__core_hostname}{self.__api_events_aggregate_v3}"
+
+        rq = exec_request(self.__core_session, url, method="POST", json=params)
+        response = rq.json()
+        if response is None or "rows" not in response:
+            self.log.error(
+                'status=failed, action=get_events_by_filter_aggregation_v3, msg="Core data request return None or '
+                'has wrong response structure", '
+                'hostname="{}"'.format(self.__core_hostname))
+            raise Exception("Core data request return None or has wrong response structure")
+        return response.get("rows")
+
+    def get_events_by_filter_v3(self, pdql_query, group_by, time_from, time_to, limit=5000, offset=0):
+        params = {
+            "filter": pdql_query,
+            "groupValues": group_by,
+            "timeFrom": time_from,
+            "timeTo": time_to
+        }
+        url = f"https://{self.__core_hostname}{self.__api_events_v3.format(limit, offset)}"
+
+        rq = exec_request(self.__core_session, url, method="POST", json=params)
+        response = rq.json()
+        if response is None or "events" not in response:
+            self.log.error(
+                'status=failed, action=get_events_by_filter_v3, msg="Core data request return None or '
+                'has wrong response structure", '
+                'hostname="{}"'.format(self.__core_hostname))
+            raise Exception("Core data request return None or has wrong response structure")
+        return response.get("events")
