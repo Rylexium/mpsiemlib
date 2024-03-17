@@ -30,6 +30,10 @@ class Assets(ModuleInterface, LoggingHandler):
 
     __api_assets_v1_passport = "/api/assets_temporal_readmodel/v1/assets_info/{}/passport"
     __api_assets_trm_readmodel_groups = "/api/assets_temporal_readmodel/v2/groups/{}"
+    __api_assets_timeline_token = "/api/v1/asset/timeline/{}/token?datetime={}"  #returned long token
+    __api_assets_tree_root = "/api/assets/tree/root?token={}" #?token={token}
+    __api_assets_processing_input_assets = "/api/assets_processing/v2/assets_input/assets/{}"
+    __api_assets_host_roles = "/api/assets/tree/collection/Core.Host/{}/hostRoles?full=true&limit={}&offset={}&token={}"
 
     def __init__(self, auth: MPSIEMAuth, settings: Settings):
         ModuleInterface.__init__(self, auth, settings)
@@ -94,12 +98,14 @@ class Assets(ModuleInterface, LoggingHandler):
 
     def create_assets_request(self,
                               pdql: str,
+                              asset_ids: List[str] = None,
                               group_ids: List[str] = None,
                               include_nested: bool = True,
                               utc_offset: str = None) -> str:
         """
         Создать поисковый pdql-запрос и получить токен для доступа к результатам
 
+        :param asset_ids:
         :param pdql: PDQL-запрос
         :param group_ids: Список ID групп в которых надо искать активы
         :param include_nested: Искать ли во вложенных группах
@@ -113,7 +119,8 @@ class Assets(ModuleInterface, LoggingHandler):
 
         params = {"pdql": pdql,
                   "selectedGroupIds": group_ids if group_ids is not None else [],
-                  "additionalFilterParameters": {"groupIds": [], "assetIds": []},
+                  "additionalFilterParameters": {"groupIds": [] if group_ids is None else group_ids,
+                                                 "assetIds": [] if asset_ids is None else asset_ids},
                   "includeNestedGroups": include_nested,
                   "utcOffset": utc_offset if utc_offset is not None else self.__default_utc_offset}
 
@@ -873,6 +880,35 @@ class Assets(ModuleInterface, LoggingHandler):
                           'hostname="{}"'.format(query_name, query_id, self.__core_hostname))
 
         return r
+
+    def get_assets_info_passport(self, assets_id):
+        url = f"https://{self.__core_hostname}{self.__api_assets_v1_passport.format(assets_id)}"
+        r = exec_request(self.__core_session, url, method="GET", timeout=self.settings.connection_timeout)
+        response = r.json()
+        return response
+
+    def get_os_soft_by_assets_id(self, assets_id):
+        url = f"https://{self.__core_hostname}{self.__api_assets_processing_input_assets.format(assets_id)}"
+        r = exec_request(self.__core_session, url, method="GET", timeout=self.settings.connection_timeout)
+        response = r.json()
+        return response
+
+    def get_tree_root(self, assets_id):
+        result = {}
+
+        url = f"https://{self.__core_hostname}{self.__api_assets_timeline_token.format(assets_id, int(time.time()))}"
+        r = exec_request(self.__core_session, url, "GET", timeout=self.settings.connection_timeout)
+        token = r.json()['token']
+
+        url = f"https://{self.__core_hostname}{self.__api_assets_tree_root.format(token)}"
+        r = exec_request(self.__core_session, url, "GET", timeout=self.settings.connection_timeout)
+        result['tree_root'] = r.json()
+
+        url = f"https://{self.__core_hostname}{self.__api_assets_host_roles.format(assets_id, 50, 0, token)}"
+        r = exec_request(self.__core_session, url, "GET", timeout=self.settings.connection_timeout)
+        result['host_roles'] = r.json()
+
+        return result
 
     def get_asset_by_id(self, assets_id):
         if assets_id is None:
