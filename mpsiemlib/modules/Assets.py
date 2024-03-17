@@ -1,4 +1,6 @@
-﻿import pytz
+﻿import copy
+
+import pytz
 import time
 from datetime import datetime
 from typing import List, Tuple, Optional, Iterator, Union
@@ -27,6 +29,13 @@ class Assets(ModuleInterface, LoggingHandler):
     __api_assets_v2_import_operation = "/api/assets_processing/v2/csv/import_operation"
     __api_assets_v1_removeassets = "/api/assets_processing/v1/asset_operations/removeAssets"
     __api_assets_v1_assetsid = "/api/v1/asset/state/?assetsId=00000000-0000-0000-0000-000000000000"
+
+    __api_assets_v1_passport = "/api/assets_temporal_readmodel/v1/assets_info/{}/passport"
+    __api_assets_trm_readmodel_groups = "/api/assets_temporal_readmodel/v2/groups/{}"
+    __api_assets_timeline_token = "/api/v1/asset/timeline/{}/token?datetime={}"  #returned long token
+    __api_assets_tree_root = "/api/assets/tree/root?token={}" #?token={token}
+    __api_assets_processing_input_assets = "/api/assets_processing/v2/assets_input/assets/{}"
+    __api_assets_host_roles = "/api/assets/tree/collection/Core.Host/{}/hostRoles?full=true&limit={}&offset={}&token={}"
 
     def __init__(self, auth: MPSIEMAuth, settings: Settings):
         ModuleInterface.__init__(self, auth, settings)
@@ -91,12 +100,14 @@ class Assets(ModuleInterface, LoggingHandler):
 
     def create_assets_request(self,
                               pdql: str,
+                              asset_ids: List[str] = None,
                               group_ids: List[str] = None,
                               include_nested: bool = True,
                               utc_offset: str = None) -> str:
         """
         Создать поисковый pdql-запрос и получить токен для доступа к результатам
 
+        :param asset_ids:
         :param pdql: PDQL-запрос
         :param group_ids: Список ID групп в которых надо искать активы
         :param include_nested: Искать ли во вложенных группах
@@ -110,7 +121,8 @@ class Assets(ModuleInterface, LoggingHandler):
 
         params = {"pdql": pdql,
                   "selectedGroupIds": group_ids if group_ids is not None else [],
-                  "additionalFilterParameters": {"groupIds": [], "assetIds": []},
+                  "additionalFilterParameters": {"groupIds": [] if group_ids is None else group_ids,
+                                                 "assetIds": [] if asset_ids is None else asset_ids},
                   "includeNestedGroups": include_nested,
                   "utcOffset": utc_offset if utc_offset is not None else self.__default_utc_offset}
 
@@ -425,7 +437,8 @@ class Assets(ModuleInterface, LoggingHandler):
 
         return resp
 
-    def create_group_dynamic(self, parent_id: str, group_name: str, predicate: str) -> str:
+    def create_group_dynamic(self, parent_id: str, group_name: str, predicate: str, metrics: dict=None,
+                            organization_info: dict=None, organization_infra: dict=None) -> str:
         """
         Создать динамическую группу
 
@@ -439,11 +452,12 @@ class Assets(ModuleInterface, LoggingHandler):
                        'hostname="{}"'.format(self.__core_hostname))
 
         url = "https://{}{}".format(self.__core_hostname, self.__api_assets_processing_v2_groups)
+        default_metrics = {"td": "ND", "cdp": "ND", "cr": "ND", "ir": "ND", "ar": "ND"}
         params = {"name": group_name, "parentId": parent_id, "groupType": "dynamic",
                   "predicate": predicate,
-                  "metrics": {"td": "ND", "cdp": "ND", "cr": "ND", "ir": "ND", "ar": "ND"},
-                  "organizationInformation": {},
-                  "organizationInfrastructure": {}}
+                  "metrics": default_metrics if metrics is None else metrics,
+                  "organizationInformation": {} if organization_info is None else organization_info,
+                  "organizationInfrastructure": {} if organization_infra is None else organization_infra}
 
         r = exec_request(self.__core_session,
                          url,
@@ -464,7 +478,8 @@ class Assets(ModuleInterface, LoggingHandler):
 
         return group_id
 
-    def create_group_static(self, parent_id: str, group_name: str) -> str:
+    def create_group_static(self, parent_id: str, group_name: str, metrics: dict=None,
+                            organization_info: dict=None, organization_infra: dict=None) -> str:
         """
         Создать статическую группу
 
@@ -477,10 +492,11 @@ class Assets(ModuleInterface, LoggingHandler):
                        'hostname="{}"'.format(self.__core_hostname))
 
         url = "https://{}{}".format(self.__core_hostname, self.__api_assets_processing_v2_groups)
+        default_metrics = {"td": "ND", "cdp": "ND", "cr": "ND", "ir": "ND", "ar": "ND"}
         params = {"name": group_name, "parentId": parent_id, "groupType": "static",
-                  "metrics": {"td": "ND", "cdp": "ND", "cr": "ND", "ir": "ND", "ar": "ND"},
-                  "organizationInformation": {},
-                  "organizationInfrastructure": {}}
+                  "metrics": default_metrics if metrics is None else metrics,
+                  "organizationInformation": {} if organization_info is None else organization_info,
+                  "organizationInfrastructure": {} if organization_infra is None else organization_infra}
 
         r = exec_request(self.__core_session,
                          url,
@@ -619,13 +635,20 @@ class Assets(ModuleInterface, LoggingHandler):
     def __iterate_groups_tree(self, root_node, parent_id=None):
         for i in root_node:
             node_id = i.get("id")
+            url = f"https://{self.__core_hostname}{self.__api_assets_trm_readmodel_groups.format(node_id)}"
+            r = exec_request(self.__core_session,
+                             url,
+                             method='GET',
+                             timeout=self.settings.connection_timeout)
+            resp = r.json()
             self.__groups[node_id] = {"parent_id": parent_id,
                                       "name": i.get("name"),
                                       "type": i.get("groupType"),
                                       "is_readonly": i.get("isReadOnly", False),
                                       "is_removable": i.get("isRemovable", False),
                                       "is_invalid_predicate": i.get("isInvalidPredicate", False),
-                                      "is_slow": i.get("isSlow", False)}
+                                      "is_slow": i.get("isSlow", False),
+                                      "more": resp}
             node_children = i.get("children")
             if node_children is not None and len(node_children) != 0:
                 self.__iterate_groups_tree(node_children, node_id)
@@ -859,6 +882,89 @@ class Assets(ModuleInterface, LoggingHandler):
                           'hostname="{}"'.format(query_name, query_id, self.__core_hostname))
 
         return r
+
+    def get_assets_info_passport(self, assets_id):
+        url = f"https://{self.__core_hostname}{self.__api_assets_v1_passport.format(assets_id)}"
+        r = exec_request(self.__core_session, url, method="GET", timeout=self.settings.connection_timeout)
+        response = r.json()
+        return response
+
+    def get_os_soft_by_assets_id(self, assets_id):
+        url = f"https://{self.__core_hostname}{self.__api_assets_processing_input_assets.format(assets_id)}"
+        r = exec_request(self.__core_session, url, method="GET", timeout=self.settings.connection_timeout)
+        response = r.json()
+        return response
+
+    def get_tree_root(self, assets_id):
+        result = {}
+
+        url = f"https://{self.__core_hostname}{self.__api_assets_timeline_token.format(assets_id, int(time.time()))}"
+        r = exec_request(self.__core_session, url, "GET", timeout=self.settings.connection_timeout)
+        token = r.json()['token']
+
+        url = f"https://{self.__core_hostname}{self.__api_assets_tree_root.format(token)}"
+        r = exec_request(self.__core_session, url, "GET", timeout=self.settings.connection_timeout)
+        result['tree_root'] = r.json()
+
+        url = f"https://{self.__core_hostname}{self.__api_assets_host_roles.format(assets_id, 50, 0, token)}"
+        r = exec_request(self.__core_session, url, "GET", timeout=self.settings.connection_timeout)
+        result['host_roles'] = r.json()
+
+        return result
+
+    def add_asset(self, softs: list[dict], os_params: list[dict], os_ports: list[dict], os_id: int,
+                  groups_id: list[str], asset_name: str, hostnames: list[str], ips: list[str], fqdns: list[str],
+                  macs: list[str], metrics: dict, is_virtual: bool = None, scanning_interval: dict = None,
+                  no_ttl: bool = False):
+
+        validate_url = f"/api/assets_processing/v2/assets_input/assets/key/validate?operatingSystemId={os_id}" \
+                       f"&scopeId=00000000-0000-0000-0000-000000000005"
+        url = f"https://{self.__core_hostname}{validate_url}"
+        params = {
+            "properties": [
+                {"name": "isVirtual", "values": [is_virtual] if is_virtual is not None else None},
+                {"name": "hostname", "values": hostnames},
+                {"name": "ip", "values": ips},
+                {"name": "fqdn", "values": fqdns},
+                {"name": "mac", "values": macs}
+            ]
+        }
+        r = exec_request(self.__core_session, url, method="POST", json=params)
+        if r.status_code != 200:
+            raise "Not validate"
+
+        params = {
+              "softs": [soft for soft in softs if soft['id'] >= 0],
+              "noTtl": no_ttl,
+              "scanningIntervals": {} if scanning_interval is None else scanning_interval,
+              "os": {"properties": os_params, "ports": [os_ports[0]], "id": os_id},
+              "groups": groups_id,
+              "scopeId": "00000000-0000-0000-0000-000000000005",
+              "userAssetName": asset_name,
+              "key": {
+                    "properties": [
+                          {"name": "isVirtual", "values": [is_virtual] if is_virtual is not None else None},
+                          {"name": "hostname", "values": [hostnames[0]]},
+                          {"name": "ip", "values": [ips[0]]},
+                          {"name": "fqdn", "values": [fqdns[0]]},
+                          {"name": "mac", "values": [macs[0]]}
+                    ]
+              },
+              "metrics": {  # metrics
+                    "targetDistribution": "ND",
+                    "confidentialityRequirement": "L",
+                    "collateralDamagePotential": "ND",
+                    "availabilityRequirement": "H",
+                    "integrityRequirement": "M"
+              } if metrics is None else metrics,
+              "importanceValue": "ND"
+        }
+
+        api_url = copy.copy(self.__api_assets_processing_input_assets).replace('{}', '') # "/api/assets_processing/v2/assets_input/assets"
+        url = f"https://{self.__core_hostname}{api_url}"
+        r = exec_request(self.__core_session, url, method="POST", json=params)
+        response = r.json()
+        return response.get('ticketId')
 
     def get_asset_by_id(self, assets_id):
         if assets_id is None:
