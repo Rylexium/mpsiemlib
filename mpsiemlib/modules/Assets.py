@@ -914,7 +914,7 @@ class Assets(ModuleInterface, LoggingHandler):
 
     def add_asset(self, softs: list[dict], os_params: list[dict], os_ports: list[dict], os_id: int,
                   groups_id: list[str], asset_name: str, hostnames: list[str], ips: list[str], fqdns: list[str],
-                  macs: list[str], metrics: dict, is_virtual: bool = None, scanning_interval: dict = None,
+                  macs: list[str], metrics: dict, importance: str, is_virtual: bool = None, scanning_interval: dict = None,
                   no_ttl: bool = False):
 
         validate_url = f"/api/assets_processing/v2/assets_input/assets/key/validate?operatingSystemId={os_id}" \
@@ -957,7 +957,7 @@ class Assets(ModuleInterface, LoggingHandler):
                     "availabilityRequirement": "H",
                     "integrityRequirement": "M"
               } if metrics is None else metrics,
-              "importanceValue": "ND"
+              "importanceValue": importance
         }
 
         api_url = copy.copy(self.__api_assets_processing_input_assets).replace('{}', '') # "/api/assets_processing/v2/assets_input/assets"
