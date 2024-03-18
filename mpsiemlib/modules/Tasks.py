@@ -34,8 +34,8 @@ class Tasks(ModuleInterface, LoggingHandler):
     __api_fail_job = "/api/scanning/v2/runs/{}/jobs?limit=50&orderby=startedAt+desc"
     __api_error_pattern_messages_new = "/ng1/Content/locales/l10n/ru-RU/external/scan-errors-log.json?{}"  # R25
     __api_error_pattern_messages_old = "/Content/locales/l10n/ru-RU/external/scan-errors-log.json?{}"  # R23 - R24
-    __api_credentials_login_password = "/api/v3/credentials/login_passwords" # v25
-    __api_credentials_certificate = "/api/v3/credentials/certificates" # v25
+    __api_credentials_login_password = "/api/v3/credentials/login_passwords"  # v25
+    __api_credentials_certificate = "/api/v3/credentials/certificates"  # v25
     __api_credentials_password_only = "/api/v3/credentials/passwords_only"
 
     def __init__(self, auth: MPSIEMAuth, settings: Settings):
@@ -490,7 +490,7 @@ class Tasks(ModuleInterface, LoggingHandler):
 
         subtask_id : uuid подзадачи у раннера в задаче
         """
-        self.settings.connection_timeout = 180 #увеличиваю timeout
+        self.settings.connection_timeout = 180  # увеличиваю timeout
 
         # задача состоит из одной подзадачи если =0, иначе много подзадач
         items = self.__get_api_url(self.__api_error_messages.format(subtask_id, limit, offset))
@@ -515,7 +515,7 @@ class Tasks(ModuleInterface, LoggingHandler):
                 for param in params:
                     pattern = pattern.replace('{{' + param + '}}', str(params[param]))
             rows.append({"time": item['occurredAt'], "source": item['sourceName'],
-                         "message": re.sub("\s\s+" , " ", pattern)})
+                         "message": re.sub("\s\s+", " ", pattern)})
 
         return rows
 
@@ -637,7 +637,25 @@ class Tasks(ModuleInterface, LoggingHandler):
         response = r.json()
         return response
 
-    def add_login_password_credentials(self, name: str, login: str, password: str, domain: str, description: str, credential_tags: list):
+    def post_profile_info(self, name: str, description: str, base_profile_id: str, base_profile_name: str,
+                          module_name: str, profile: str, profiles, overrides):
+        url = f"https://{self.__core_hostname}{self.__api_profiles_list}"
+
+        params = {
+            "name": name,
+            "description": description,
+            "baseProfileId": base_profile_id,
+            "baseProfileName": base_profile_name,
+            "moduleName": module_name,
+            "profile": profile, #moduleId
+            "overrides": overrides
+        }
+        r = exec_request(self.__core_session, url, method="POST", json=params)
+        response = r.json()
+        return response
+
+    def add_login_password_credentials(self, name: str, login: str, password: str, domain: str, description: str,
+                                       credential_tags: list):
         url = f"https://{self.__core_hostname}{self.__api_credentials_login_password}"
         r = exec_request(self.__core_session, url,
                          method="POST", timeout=self.settings.connection_timeout,
@@ -652,7 +670,8 @@ class Tasks(ModuleInterface, LoggingHandler):
         response = r.json()
         return response.get("id")
 
-    def add_certificate_credentials(self, name: str, login: str, certificate: str, description: str, credential_tags: list):
+    def add_certificate_credentials(self, name: str, login: str, certificate: str, description: str,
+                                    credential_tags: list):
         url = f"https://{self.__core_hostname}{self.__api_credentials_certificate}"
         r = exec_request(self.__core_session, url,
                          method="POST", timeout=self.settings.connection_timeout,
@@ -711,7 +730,6 @@ class Tasks(ModuleInterface, LoggingHandler):
             return str(UUID(value_uuid)) == value_uuid
         except:
             return False
-
 
     def close(self):
         if self.__core_session is not None:
