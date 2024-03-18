@@ -319,7 +319,7 @@ class Tasks(ModuleInterface, LoggingHandler):
         self.log.info('status=success, action=get_task_info, msg="Got info for task {}", '
                       'hostname="{}"'.format(task_id, self.__core_hostname))
 
-        return task
+        return r
 
     def get_default_audit_task_params(self) -> dict:
         params = {'name': 'task_name',
