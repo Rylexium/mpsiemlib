@@ -368,7 +368,7 @@ class EventsAPI(ModuleInterface, LoggingHandler):
                                                               for column in range(len(response.get('columns')))}
                for row in response.get("rows")}
 
-    def get_count_distinct_field_values(self, filter, fields, time_from, time_to, top=None):
+    def get_count_distinct_field_values(self, filter, fields, time_from, time_to, top=10000):
         """
             Получить количество уникальных значений в поле(полях) и количество их появления у конкретного значения
 
@@ -420,7 +420,7 @@ class EventsAPI(ModuleInterface, LoggingHandler):
                     "searchType": None,
                     "searchSources": None,
                     "localSources": None,
-                    "showNullGroups": False
+                    "showNullGroups": True
                   },
                 "timeFrom": time_from,
                 "timeTo": time_to
