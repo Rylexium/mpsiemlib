@@ -456,10 +456,13 @@ class EventsAPI(ModuleInterface, LoggingHandler):
             for match in result:
                 filter = filter.replace(f"\'{match}\'", match).replace(f"\"{match}\"", match)
 
+            timespan = f""
+            if len(distributeBy) >= 1:
+                timespan = f", timespan: time by {distributeBy[0]['granularity']}"
             pdql_query_filter = f"filter({filter}) | select(time) | sort(time desc) | "
             pdql_query_option = f"""group(key: {groupBy},  
-                                          agg: {func}({", ".join([agg["field"] for agg in aggregateBy])}) as Cnt, 
-                                          timespan: time by {distributeBy[0]['granularity']}) 
+                                          agg: {func}({", ".join([agg["field"] for agg in aggregateBy])}) as Cnt
+                                          {timespan}) 
                                           | sort(Cnt desc) | limit({top})"""\
                 .replace('\'', '').replace("\"", '').replace('\n', '')
             pdql_query_option = re.sub("\s\s+" , " ", pdql_query_option)
