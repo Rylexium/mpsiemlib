@@ -422,8 +422,8 @@ class EventsAPI(ModuleInterface, LoggingHandler):
                     "localSources": None,
                     "showNullGroups": True
                   },
-                "timeFrom": time_from,
-                "timeTo": time_to
+                "timeFrom": int(time_from),
+                "timeTo": int(time_to)
             }
             url = f"https://{self.__core_hostname}{self.__api_events_aggregate}"
         rq = exec_request(self.__core_session, url, method="POST", json=params)
