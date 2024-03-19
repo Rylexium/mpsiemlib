@@ -395,6 +395,7 @@ class EventsAPI(ModuleInterface, LoggingHandler):
                 {'subject.name': 'apache', 'count': 4}, {'subject.name': 'None', 'count': 958}]
             """
         core_version = int(self.__core_version.split('.')[0])
+        result, rows = [], []
         if core_version < 25:
             params = {
                 "timeFrom": time_from,
@@ -406,35 +407,14 @@ class EventsAPI(ModuleInterface, LoggingHandler):
                 "top": top
             }
             url = f"https://{self.__core_hostname}{self.__api_events_count_distinct_field_values}"
-        else:
-            params = {
-                "filter": {
-                    "select": ["time"],
-                    "where": filter,
-                    "orderBy": [{"field": "time", "sortOrder": "descending"}],
-                    "groupBy": fields,
-                    "aggregateBy": [{"function": "COUNT", "field": "*", "unique": False}],
-                    "distributeBy": [],
-                    "top": top,
-                    "aliases": {"select": None, "groupBy": {}, "aggregateBy": {"COUNT": "Cnt"}},
-                    "searchType": None,
-                    "searchSources": None,
-                    "localSources": None,
-                    "showNullGroups": True
-                  },
-                "timeFrom": int(time_from),
-                "timeTo": int(time_to)
-            }
-            url = f"https://{self.__core_hostname}{self.__api_events_aggregate}"
-        rq = exec_request(self.__core_session, url, method="POST", json=params)
-        response = rq.json()
-
-        result, rows = [], []
-        if core_version < 25:
+            rq = exec_request(self.__core_session, url, method="POST", json=params)
+            response = rq.json()
             rows = response
         else:
-            if response.get('rows') is not None:
-                rows = response['rows']
+            rows = self.get_events_by_filter_aggregation(filter=filter, groupBy=fields,
+                                                         aggregateBy=[{"function": "COUNT", "field": "*", "unique": False}],
+                                                         distributeBy=[], time_from=time_from, time_to=time_to,
+                                                         top=10000, offset=0)
 
         for line in rows:
             values = line['values' if core_version < 25 else 'groups']
