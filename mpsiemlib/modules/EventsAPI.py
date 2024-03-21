@@ -113,7 +113,7 @@ class EventsAPI(ModuleInterface, LoggingHandler):
                 "top": 10000,
                 "aliases": {
                     "groupBy": {},
-                    "aggregateBy": {
+                    "aggregateBy": { #{'*': 'Cnt'}
                         "COUNT": "Cnt"
                     }
                 },
@@ -142,9 +142,9 @@ class EventsAPI(ModuleInterface, LoggingHandler):
                            'hostname="{}"'.format(self.__core_hostname))
             raise Exception('Core data request return None or has wrong response structure')
 
-        return {' | '.join(e['groups']):int(e['values'][0]) for e in response['rows']}
+        return {' | '.join([str(elem) for elem in e['groups']]): int(e['values'][0]) for e in response['rows']}
 
-    def get_events_by_filter(self, filter, fields, time_from, time_to, limit, offset) -> list:
+    def get_events_by_filter(self, filter, fields, time_from, time_to, offset, limit=500) -> list:
         """
         Получить события по фильру
 
@@ -172,14 +172,14 @@ class EventsAPI(ModuleInterface, LoggingHandler):
                 'groupBy': [],
                 'aggregateBy': [],
                 'distributeBy': [],
-                'top': null,
+                'top': limit,
                 'aliases': {
                     'groupBy': {}
                 }
             },
             'groupValues': [],
-            'timeFrom': time_from,
-            'timeTo': time_to
+            'timeFrom': int(time_from),
+            'timeTo': int(time_to)
         }
         api_url = self.__api_events.format(limit, offset)
         url = f'https://{self.__core_hostname}{api_url}'
@@ -345,7 +345,7 @@ class EventsAPI(ModuleInterface, LoggingHandler):
                 "top": top,
                 "aliases": {
                     "groupBy": {},
-                    "aggregateBy": null,
+                    "aggregateBy": {'*': 'Cnt'},
                     "select": null
                 }
             },
@@ -479,7 +479,7 @@ class EventsAPI(ModuleInterface, LoggingHandler):
                 "aggregateBy": aggregateBy,
                 "distributeBy": null if distributeBy == null else distributeBy,
                 "top": top,
-                "aliases": {"groupBy": {}, "aggregateBy": null, "select": null}
+                "aliases": {"groupBy": {}, "aggregateBy": {'*': 'Cnt'}, "select": null}
             },
             "timeFrom": time_from,
             "timeTo": time_to
