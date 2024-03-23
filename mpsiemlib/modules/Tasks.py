@@ -671,17 +671,22 @@ class Tasks(ModuleInterface, LoggingHandler):
         return response.get("id")
 
     def add_certificate_credentials(self, name: str, login: str, certificate: str, description: str,
-                                    credential_tags: list):
+                                    credential_tags: list, password: str = None):
         url = f"https://{self.__core_hostname}{self.__api_credentials_certificate}"
+        params = {"credentialTags": credential_tags,
+                  "description": description,
+                  "login": login,
+                  "name": name,
+                  "certificate": certificate
+                  }
+        if self.auth.get_core_version().split('.')[0] == "26":
+            if password is None:
+                raise "Field \"password\" need in SIEM v.26"
+            else:
+                params['password'] = password
         r = exec_request(self.__core_session, url,
                          method="POST", timeout=self.settings.connection_timeout,
-                         json={
-                             "credentialTags": credential_tags,
-                             "description": description,
-                             "login": login,
-                             "name": name,
-                             "certificate": certificate
-                         })
+                         json=params)
         response = r.json()
         return response.get("id")
 
