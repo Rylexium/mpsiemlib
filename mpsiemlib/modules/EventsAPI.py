@@ -86,9 +86,9 @@ class EventsAPI(ModuleInterface, LoggingHandler):
             time_from : начало диапазона поиска (Unix timestamp в секундах)
             time_to : конец диапазона поиска (Unix timestamp в секундах)
             limit: число запрашиваемых событий, соответсвующих фильтру
-            offset: позиция, начиная с которой возвращать требуемое число событий, соответсвующих фильтру
+            offset: позиция, начиная с которой возвращать требуемое число событий, соответсвующих фильтру 
         Returns:
-            [type]: массив событий
+            [type]: массив событий 
         """
         null = None
         false = False
@@ -146,7 +146,7 @@ class EventsAPI(ModuleInterface, LoggingHandler):
 
     def get_events_by_filter(self, filter, fields, time_from, time_to, offset, limit=500, sort="ascending") -> list:
         """
-        Получить события по фильру
+        Получить события по фильру 
 
         Args:
             filter : фильтр на языке PDQL
@@ -154,9 +154,9 @@ class EventsAPI(ModuleInterface, LoggingHandler):
             time_from : начало диапазона поиска (Unix timestamp в секундах)
             time_to : конец диапазона поиска (Unix timestamp в секундах)
             limit: число запрашиваемых событий, соответсвующих фильтру
-            offset: позиция, начиная с которой возвращать требуемое число событий, соответсвующих фильтру
+            offset: позиция, начиная с которой возвращать требуемое число событий, соответсвующих фильтру 
         Returns:
-            [type]: массив событий
+            [type]: массив событий 
         """
         null = None
         params = {
@@ -196,7 +196,7 @@ class EventsAPI(ModuleInterface, LoggingHandler):
 
     def get_events_for_incident(self, fields, incident_id, time_from, time_to, limit, offset):
         """
-        Получить события, связанные с инцидентом
+        Получить события, связанные с инцидентом 
 
         Args:
             fields : список запрашиваемых полей событий
@@ -206,7 +206,7 @@ class EventsAPI(ModuleInterface, LoggingHandler):
             limit: число запрашиваемых событий, связанных с инцидентом
             offset: позиция, начиная с которой возвращать требуемое число событий, связанны с инцидентом
         Returns:
-            [type]: массив событий
+            [type]: массив событий 
         """
         null = None
         params = {
