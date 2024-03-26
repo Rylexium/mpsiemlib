@@ -144,7 +144,7 @@ class EventsAPI(ModuleInterface, LoggingHandler):
 
         return {' | '.join([str(elem) for elem in e['groups']]): int(e['values'][0]) for e in response['rows']}
 
-    def get_events_by_filter(self, filter, fields, time_from, time_to, offset, limit=500) -> list:
+    def get_events_by_filter(self, filter, fields, time_from, time_to, offset, limit=500, sort="ascending") -> list:
         """
         Получить события по фильру
 
@@ -166,13 +166,13 @@ class EventsAPI(ModuleInterface, LoggingHandler):
                 'orderBy': [
                     {
                         'field': 'time',
-                        'sortOrder': 'ascending'
+                        'sortOrder': sort,
                     }
                 ],
                 'groupBy': [],
                 'aggregateBy': [],
                 'distributeBy': [],
-                'top': limit,
+                'top': null,
                 'aliases': {
                     'groupBy': {}
                 }
