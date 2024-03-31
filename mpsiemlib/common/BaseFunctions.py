@@ -26,7 +26,7 @@ def setup_logging(default_path='logging.yml', default_level=logging.INFO, env_ke
         logging.basicConfig(level=default_level)
 
 
-def exec_request(session: requests.Session, url: str, method='GET', timeout=30, timeout_up=1,
+def exec_request(session: requests.Session, url: str, method='GET', timeout=60, timeout_up=1,
                  **kwargs) -> requests.Response:
     """
     Выполнение HTTP запросов
