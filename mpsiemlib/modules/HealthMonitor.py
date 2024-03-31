@@ -29,10 +29,19 @@ class HealthMonitor(ModuleInterface, LoggingHandler):
     def __init__(self, auth: MPSIEMAuth, settings: Settings):
         ModuleInterface.__init__(self, auth, settings)
         LoggingHandler.__init__(self)
-        self.__core_session = auth.connect(MPComponents.CORE)
+
+        try:
+            self.__core_session = auth.connect(MPComponents.CORE)
+        except:
+            self.__core_session = None
         self.__core_hostname = auth.creds.core_hostname
         self.__core_version = auth.get_core_version()
-        self.__kb_session = auth.connect(MPComponents.KB)
+
+        try:
+            self.__kb_session = auth.connect(MPComponents.KB)
+        except:
+            self.__kb_session = None
+
         self.__error_patterns = None
 
     def get_health_status(self) -> str:
