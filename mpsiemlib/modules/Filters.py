@@ -1,3 +1,5 @@
+import re
+
 from mpsiemlib.common import ModuleInterface, MPSIEMAuth, LoggingHandler, MPComponents, Settings
 from mpsiemlib.common import exec_request
 
@@ -12,13 +14,27 @@ class Filters(ModuleInterface, LoggingHandler):
     __api_folders = '/api/v2/events/folders'
     __api_filters = '/api/v2/events/filters'
 
+    __api_filters_v3 = '/api/v3/events/filters'
     __api_filter_info_v3 = "/api/v3/events/filters/{}"
+
+    class Distribute:
+        period_1min, period_5min, period_10min, period_30min = '1m', '5m', '10m', '30m'
+        period_1hour, period_3hour, period_8hour, period_12hour = '1h', '3h', '8h', '12h'
+        period_1day, period_10day, period_1week, period_2week = '1d', '10d', '1w', '2w'
+        period_30day, period_90day = '30d', '90d'
+        all_periods = ['1m', '5m', '10m', '30m', '1h', '3h', '8h', '12h', '1d', '10d', '1w', '2w', '30d', '90d']
+
+    class Aggregation:
+        function_count, function_avg, function_max = "COUNT", "AVG", "MAX"
+        function_min, function_sum, function_median = "MIN", "SUM", "MEDIAN"
+        all_function = ["COUNT", "AVG", "MAX", "MIN", "SUM", "MEDIAN"]
 
     def __init__(self, auth: MPSIEMAuth, settings: Settings):
         ModuleInterface.__init__(self, auth, settings)
         LoggingHandler.__init__(self)
         self.__core_session = auth.connect(MPComponents.CORE)
         self.__core_hostname = auth.creds.core_hostname
+        self.__core_version = auth.get_core_version()
         self.__folders = {}
         self.__filters = {}
         self.log.debug('status=success, action=prepare, msg="Filters Module init"')
@@ -166,12 +182,32 @@ class Filters(ModuleInterface, LoggingHandler):
         return r.status_code == 200
 
     def create_filter_by_folder_name(self, filter, folder_name):
-        folder_id = self.get_folder_by_name(folder_name)
+        folder_id = self.get_folder_by_name(folder_name)['uuid']
         return self.create_filter_by_folder_id(filter, folder_id)
 
     def create_filter_by_folder_id(self, filter, folder_id):
+        """example filter:
+        {
+            "name":"test_test_test",
+            "select":["time","event_src.host","body"],
+            "where":"object.name = \"test\"",
+            "orderBy":[{"field":"time","sortOrder":"descending"}],
+            "groupByOrder":null,
+            "groupBy":[],
+            "aggregateBy":[],
+            "distributeBy":[],
+            "searchType":null,
+            "searchSources":null,
+            "localSources":null,
+            "showNullGroups":null,
+            "top":null,
+            "aliases":{"select":null,"groupBy":null,"aggregateBy":null},
+            "permissions":["edit","delete"]
+        }
+        """
         url = f'https://{self.__core_hostname}{self.__api_filters}'
         filter['folderId'] = folder_id
+
         r = exec_request(self.__core_session,
                          url,
                          method='POST',
@@ -190,6 +226,33 @@ class Filters(ModuleInterface, LoggingHandler):
                       'hostname="{}"'.format(filter_id, self.__core_hostname))
 
         return filter_info
+
+    def create_pdql_v3_filter(self, filter, select, groupBy, aggregateBy, distributeBy, top):
+        func = None
+        if len(aggregateBy) != 0:
+            for agg_func in self.Aggregation.all_function:
+                if agg_func.lower() == str(aggregateBy[0]['function']).lower():
+                    func = f"{agg_func.upper()}UNIQUE" if aggregateBy[0]["unique"] is True else agg_func.upper()
+                    break
+        else:
+            aggregateBy = [{'function': 'COUNT', 'unique': False, 'field': '*'}]
+
+        result = re.findall(r'in_subnet\s*\([^,]+,\s*["\']([^"\']+)["\']\)', filter)
+        for match in result:
+            filter = filter.replace(f"\'{match}\'", match).replace(f"\"{match}\"", match)
+
+        timespan = f""
+        if len(distributeBy) >= 1:
+            timespan = f", timespan: time by {distributeBy[0]['granularity']}"
+        pdql_query_filter = f"filter({filter}) | select({', '.join(select)}) | sort(time desc) | "
+        pdql_query_option = f"""group(key: {groupBy},  
+                                      agg: {func}({", ".join([agg["field"] for agg in aggregateBy])}) as Cnt
+                                      {timespan}) 
+                                      | sort(Cnt desc) | limit({top})""" \
+            .replace('\'', '').replace("\"", '').replace('\n', '')
+        pdql_query_option = re.sub("\s\s+", " ", pdql_query_option)
+        return f"{pdql_query_filter}{pdql_query_option}"
+
 
     def close(self):
         if self.__core_session is not None:

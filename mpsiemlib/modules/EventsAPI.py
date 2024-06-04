@@ -446,27 +446,8 @@ class EventsAPI(ModuleInterface, LoggingHandler):
         """
         core_version = int(self.__core_version.split('.')[0])
         if core_version > 25:
-            func = None
-            for agg_func in self.Aggregation.all_function:
-                if agg_func.lower() == str(aggregateBy[0]['function']).lower():
-                    func = f"{agg_func.upper()}UNIQUE" if aggregateBy[0]["unique"] is True else agg_func.upper()
-                    break
-
-            result = re.findall(r'in_subnet\s*\([^,]+,\s*["\']([^"\']+)["\']\)', filter)
-            for match in result:
-                filter = filter.replace(f"\'{match}\'", match).replace(f"\"{match}\"", match)
-
-            timespan = f""
-            if len(distributeBy) >= 1:
-                timespan = f", timespan: time by {distributeBy[0]['granularity']}"
-            pdql_query_filter = f"filter({filter}) | select(time) | sort(time desc) | "
-            pdql_query_option = f"""group(key: {groupBy},  
-                                          agg: {func}({", ".join([agg["field"] for agg in aggregateBy])}) as Cnt
-                                          {timespan}) 
-                                          | sort(Cnt desc) | limit({top})"""\
-                .replace('\'', '').replace("\"", '').replace('\n', '')
-            pdql_query_option = re.sub("\s\s+" , " ", pdql_query_option)
-            pdql_query = f"{pdql_query_filter}{pdql_query_option}"
+            pdql_query = self.create_pdql_v3_filter(filter=filter, groupBy=groupBy, aggregateBy=aggregateBy,
+                                                    distributeBy=distributeBy, top=top)
             return self.get_events_by_filter_aggregation_v3(pdql_query=pdql_query, time_from=time_from, time_to=time_to)
 
         null = None
@@ -497,6 +478,30 @@ class EventsAPI(ModuleInterface, LoggingHandler):
                 'hostname="{}"'.format(self.__core_hostname))
             raise Exception("Core data request return None or has wrong response structure")
         return response.get("rows")
+
+    def create_pdql_v3_filter(self, filter, groupBy, aggregateBy, distributeBy, top):
+        func = None
+        for agg_func in self.Aggregation.all_function:
+            if agg_func.lower() == str(aggregateBy[0]['function']).lower():
+                func = f"{agg_func.upper()}UNIQUE" if aggregateBy[0]["unique"] is True else agg_func.upper()
+                break
+
+        result = re.findall(r'in_subnet\s*\([^,]+,\s*["\']([^"\']+)["\']\)', filter)
+        for match in result:
+            filter = filter.replace(f"\'{match}\'", match).replace(f"\"{match}\"", match)
+
+        timespan = f""
+        if len(distributeBy) >= 1:
+            timespan = f", timespan: time by {distributeBy[0]['granularity']}"
+        pdql_query_filter = f"filter({filter}) | select(time) | sort(time desc) | "
+        pdql_query_option = f"""group(key: {groupBy},  
+                                      agg: {func}({", ".join([agg["field"] for agg in aggregateBy])}) as Cnt
+                                      {timespan}) 
+                                      | sort(Cnt desc) | limit({top})""" \
+            .replace('\'', '').replace("\"", '').replace('\n', '')
+        pdql_query_option = re.sub("\s\s+", " ", pdql_query_option)
+        return f"{pdql_query_filter}{pdql_query_option}"
+
 
     def get_events_by_filter_aggregation_v3(self, pdql_query, time_from, time_to):
         params = {
